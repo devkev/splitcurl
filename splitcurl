@@ -26,8 +26,9 @@ fi
  
 SPLITNUM=${2:-4}
 URL=$1
-FILENAME="`basename $URL`"
-SIZE="`curl -qI $URL 2> /dev/null|awk '/Length/ {print $2}'|grep -o '[0-9]*'`"
+FILENAME="`basename "$URL"`"
+FILENAME="${FILENAME%%\?*}"
+SIZE="`curl -qi "$URL" 2> /dev/null | tr -d '\015' | awk '/^$/{exit} /Length/{print $2}'|grep -o '[0-9]*'`"
 SIZE=${SIZE:-1} 
 [ $SIZE -gt 0 ] || SPLITNUM=1
 START=0
@@ -38,7 +39,7 @@ END=$CHUNK
 trap 'clean' SIGINT SIGTERM
  
 #Test splitness
-OUT=`curl -m 2 --range 0-0 $URL 2> /dev/null|while read -n 1 C;do
+OUT=`curl -m 10 --range 0-0 "$URL" 2> /dev/null|while read -n 1 C;do
   OUT="${OUT}½"
   echo $OUT
   [ ${#OUT} -gt 1 ] && break
@@ -47,19 +48,19 @@ done`
 case ${#OUT} in
 0)  clean;; #Curl error
 1)  ;; #Got a byte
-*)  echo Server does not spit...;SPLITNUM=1;; #Got more than asked for
+*)  echo "Server does not split, using 1 thread...";SPLITNUM=1;; #Got more than asked for
 esac
  
 #Invoke curls
 for PART in `eval echo {1..$SPLITNUM}`;do
-  curl --ftp-pasv -o /tmp/$FILENAME.$PART --range $START-$END $URL 2> /dev/null &
+  curl --ftp-pasv -o /tmp/"$FILENAME.$PART" --range $START-$END "$URL" 2> /dev/null &
   START=$(($START+$CHUNK+1))
   END=$(($START+$CHUNK))
 done
  
 TIME=$((`date +%s`-1))
 function calc {
- GOTSIZE=$((`eval ls -l /tmp/$FILENAME.{1..$SPLITNUM} 2> /dev/null|awk 'BEGIN{SUM=0}{SUM=SUM+$5}END{print SUM}'`))
+ GOTSIZE=$((`eval ls -l /tmp/"'$FILENAME'".{1..$SPLITNUM} 2> /dev/null|awk 'BEGIN{SUM=0}{SUM=SUM+$5}END{print SUM}'`))
  TIMEDIFF=$(( `date +%s` - $TIME ))
  RATE=$(( ($GOTSIZE / $TIMEDIFF)/1024 ))
  PCT=$(( ($GOTSIZE*100) / $SIZE ))
@@ -76,6 +77,6 @@ calc
 echo "Downloading $FILENAME in $SPLITNUM parts: $GOTSIZE / $SIZE bytes @ $RATE kb/s ($PCT%).    "
  
 #Join all the parts
-eval cat /tmp/$FILENAME.{1..$SPLITNUM} > $FILENAME
+eval cat /tmp/"'$FILENAME'".{1..$SPLITNUM} > "$FILENAME"
 echo "Files done!"
-rm /tmp/$FILENAME.* 2> /dev/null
+rm /tmp/"$FILENAME".* 2> /dev/null
